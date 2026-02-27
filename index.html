@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Image Generator</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); 
+            color: white; 
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 500px; margin: 0 auto; }
+        h1 { text-align: center; margin-bottom: 10px; font-size: 24px; }
+        .subtitle { text-align: center; color: #888; margin-bottom: 30px; font-size: 14px; }
+        
+        .input-group { margin-bottom: 15px; }
+        input[type="text"] { 
+            width: 100%; 
+            padding: 15px; 
+            border-radius: 12px; 
+            border: 2px solid #333; 
+            background: #252540; 
+            color: white; 
+            font-size: 16px;
+            outline: none;
+        }
+        input[type="text"]:focus { border-color: #00d4ff; }
+        
+        button { 
+            width: 100%; 
+            padding: 15px; 
+            border-radius: 12px; 
+            border: none; 
+            background: linear-gradient(135deg, #00d4ff 0%, #0099cc 100%); 
+            color: white; 
+            font-size: 16px; 
+            font-weight: bold; 
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        button:active { transform: scale(0.98); }
+        button:disabled { background: #555; cursor: not-allowed; }
+        
+        .image-container { 
+            margin-top: 20px; 
+            background: #252540; 
+            border-radius: 15px; 
+            overflow: hidden;
+            min-height: 300px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        img { 
+            width: 100%; 
+            height: auto; 
+            display: block; 
+        }
+        .placeholder { 
+            color: #666; 
+            text-align: center; 
+            padding: 40px;
+        }
+        .loading { 
+            display: none; 
+            text-align: center; 
+            padding: 40px;
+        }
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #333;
+            border-top: 4px solid #00d4ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        .error { color: #ff6b6b; text-align: center; padding: 20px; }
+        .download-btn {
+            display: none;
+            width: 100%;
+            padding: 12px;
+            margin-top: 15px;
+            border-radius: 12px;
+            border: none;
+            background: #252540;
+            color: white;
+            font-size: 14px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎨 AI Image Generator</h1>
+        <p class="subtitle">Powered by Pollinations.ai (100% Gratis)</p>
+        
+        <div class="input-group">
+            <input type="text" id="prompt" placeholder="Contoh: cute cat in space, digital art..." />
+        </div>
+        
+        <button onclick="generateImage()" id="btnGenerate">✨ Generate</button>
+        
+        <div class="image-container">
+            <div class="placeholder" id="placeholder">
+                <p>🖼️</p>
+                <p style="margin-top: 10px;">Gambar akan muncul di sini</p>
+            </div>
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Sedang menggambar...</p>
+            </div>
+            <img id="resultImage" alt="AI Generated" style="display: none;" />
+        </div>
+        
+        <button class="download-btn" id="downloadBtn" onclick="downloadImage()">📥 Download Gambar</button>
+    </div>
+
+    <script>
+        let currentImageUrl = '';
+        
+        async function generateImage() {
+            const promptInput = document.getElementById('prompt');
+            const prompt = promptInput.value.trim();
+            const img = document.getElementById('resultImage');
+            const loading = document.getElementById('loading');
+            const placeholder = document.getElementById('placeholder');
+            const btn = document.getElementById('btnGenerate');
+            const downloadBtn = document.getElementById('downloadBtn');
+            
+            if (!prompt) {
+                alert('⚠️ Isi prompt dulu bang!');
+                return;
+            }
+            
+            // Reset UI
+            btn.disabled = true;
+            btn.textContent = '⏳ Loading...';
+            placeholder.style.display = 'none';
+            img.style.display = 'none';
+            downloadBtn.style.display = 'none';
+            loading.style.display = 'block';
+            
+            // Generate random seed untuk variasi
+            const seed = Math.floor(Math.random() * 99999);
+            const width = 1024;
+            const height = 1024;
+            
+            // URL API Pollinations (tanpa encode berlebihan)
+            currentImageUrl = `https://image.pollinations.ai/prompt/${prompt}?width=${width}&height=${height}&seed=${seed}&nologo=true`;
+            
+            // Set image source
+            img.onload = function() {
+                loading.style.display = 'none';
+                img.style.display = 'block';
+                btn.disabled = false;
+                btn.textContent = '✨ Generate';
+                downloadBtn.style.display = 'block';
+            };
+            
+            img.onerror = function() {
+                loading.style.display = 'none';
+                placeholder.style.display = 'block';
+                placeholder.innerHTML = '<p class="error">❌ Gagal load gambar</p><p style="margin-top:10px;font-size:12px;">Coba prompt bahasa Inggris atau ganti kata</p>';
+                btn.disabled = false;
+                btn.textContent = '✨ Generate';
+            };
+            
+            // Tambah timestamp untuk avoid cache
+            img.src = currentImageUrl + '&t=' + Date.now();
+        }
+        
+        async function downloadImage() {
+            if (!currentImageUrl) return;
+            
+            try {
+                const response = await fetch(currentImageUrl);
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `ai-image-${Date.now()}.jpg`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+            } catch (e) {
+                // Fallback: buka gambar di tab baru
+                window.open(currentImageUrl, '_blank');
+            }
+        }
+        
+        // Enter key untuk generate
+        document.getElementById('prompt').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') generateImage();
+        });
+    </script>
+</body>
+</html>
