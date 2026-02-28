@@ -1,24 +1,70 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/router';
+import { generateImage, MODELS, ASPECT_RATIOS } from '../lib/pollinations';
+import { 
+  loadAPIKey, saveGenerateCount, getGenerateCount, 
+  saveHistory, getHistory, loadPreferences, incrementUsage,
+  isRegistered, markAsRegistered, saveAPIKey
+} from '../lib/storage';
+import { parseAuthCallback } from '../lib/pollinations';
+import ModelSelector from '../components/ModelSelector';
+import AspectRatioSelector from '../components/AspectRatioSelector';
+import PromptControls from '../components/PromptControls';
+import ImagePreview from '../components/ImagePreview';
+import BYOPPopup from '../components/BYOPPopup';
+import UsageStats from '../components/UsageStats';
 
 export default function Home() {
+  const router = useRouter();
   const [prompt, setPrompt] = useState('');
-  const [model, setModel] = useState('zimage');
+  const [model, setModel] = useState(MODELS.FLUX);
+  const [ratio, setRatio] = useState(ASPECT_RATIOS[0].value);
   const [imageUrl, setImageUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [pollenInfo, setPollenInfo] = useState('~0.97 poli remaining');
+  const [showBYOP, setShowBYOP] = useState(false);
+  const [balance, setBalance] = useState(null);
+  const [used, setUsed] = useState(0);
 
-  const models = [
-    { value: 'zimage', label: 'ZImage (Resonance Style)' },
-    { value: 'flux', label: 'Flux (Fast & Good)' },
-    { value: 'kontext', label: 'Kontext (Context-Aware)' },
-    { value: 'klein', label: 'Klein (Lightweight)' },
-  ];
+  // Handle Pollinations auth callback
+  useEffect(() => {
+    const { apiKey, error: authError } = parseAuthCallback();
+    if (apiKey) {
+      saveAPIKey(apiKey);
+      markAsRegistered();
+      fetchBalance(apiKey);
+    }
+    if (authError) {
+      setError(`Auth failed: ${authError}`);
+    }
+  }, []);
 
-  const generateImage = async () => {
+  // Fetch balance if registered
+  const fetchBalance = async (apiKey) => {
+    // Simplified: in real app, call Pollinations API
+    // For demo, show mock data
+    setBalance(1.25);
+    setUsed(0.03);
+  };
+
+  const selectedRatio = ASPECT_RATIOS.find(r => r.value === ratio) || ASPECT_RATIOS[0];
+  const apiKey = loadAPIKey();
+  const registered = isRegistered();
+  const prefs = loadPreferences();
+
+  const handleGenerate = async () => {
     if (!prompt.trim()) {
-      alert('Isi prompt dulu!');
+      setError('Please enter a prompt');
       return;
+    }
+
+    // Check limits for limited models
+    if ([MODELS.KONTEXT, MODELS.KLEIN].includes(model)) {
+      const count = getGenerateCount(model);
+      if (!registered && count >= 3) {
+        setShowBYOP(true);
+        return;
+      }
     }
 
     setLoading(true);
@@ -26,177 +72,137 @@ export default function Home() {
     setImageUrl('');
 
     try {
-      const seed = Math.floor(Math.random() * 999999);
+      const [width, height] = ratio.split('x').map(Number);
+      const buffer = await generateImage(prompt, {
+        model, width, height, apiKey
+      });
       
-      const response = await fetch(`/api/generate?prompt=${encodeURIComponent(prompt)}&model=${model}&seed=${seed}`);
-      
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(err.error || `HTTP ${response.status}`);
-      }
-
-      const blob = await response.blob();
+      const blob = new Blob([buffer], { type: 'image/jpeg' });
       const url = URL.createObjectURL(blob);
       setImageUrl(url);
       
+      // Save to history
+      const historyCount = saveHistory({ imageUrl: url, prompt, model, ratio, date: new Date().toISOString() });
+      
+      // Show history warning if >50
+      if (historyCount > 50 && !prefs.hideHistoryWarning) {
+        alert('💡 Tip: You have 50+ images in history. Consider downloading & clearing cache to free up space.');
+      }
+      
+      // Update counts & usage
+      if ([MODELS.KONTEXT, MODELS.KLEIN].includes(model) && !registered) {
+        saveGenerateCount(model, getGenerateCount(model) + 1);
+      }
+      incrementUsage(model);
+      
     } catch (err) {
-      setError(err.message);
-      if (err.message.includes('402')) {
-        setPollenInfo('⚠️ Pollen habis! Top up di enter.pollinations.ai');
+      setError(err.message || 'Failed to generate image');
+      if (err.message?.includes('402')) {
+        setError('Insufficient pollen balance. Please top up at enter.pollinations.ai');
       }
     } finally {
       setLoading(false);
     }
   };
 
-  const downloadImage = () => {
+  const handleDownload = () => {
     if (!imageUrl) return;
     const a = document.createElement('a');
     a.href = imageUrl;
-    a.download = `ai-${model}-${Date.now()}.jpg`;
+    a.download = `genzee-${model}-${Date.now()}.jpg`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
   };
 
+  const handleModelLimit = (limitedModel) => {
+    setShowBYOP(true);
+  };
+
+  // Share functionality (PWA)
+  const handleShare = async () => {
+    if (!imageUrl || !navigator.share) return;
+    try {
+      const blob = await fetch(imageUrl).then(r => r.blob());
+      const file = new File([blob], 'image.jpg', { type: 'image/jpeg' });
+      await navigator.share({ files: [file], title: 'GENZEE', text: prompt });
+    } catch (e) {
+      // Fallback: copy URL
+      navigator.clipboard?.writeText(imageUrl);
+      alert('Image URL copied to clipboard!');
+    }
+  };
+
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: 'linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 100%)',
-      color: 'white',
-      padding: '20px',
-      fontFamily: 'system-ui, -apple-system, sans-serif'
-    }}>
-      <div style={{ maxWidth: '500px', margin: '0 auto' }}>
-        <h1 style={{ textAlign: 'center', color: '#00d4ff', marginBottom: '10px' }}>
-          🎨 AI Image Generator
-        </h1>
-        <p style={{ textAlign: 'center', color: '#888', marginBottom: '20px', fontSize: '13px' }}>
-          Powered by Pollinations • {pollenInfo}
-        </p>
-
-        <input
-          type="text"
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          placeholder="cute cat in space, digital art..."
-          onKeyPress={(e) => e.key === 'Enter' && generateImage()}
-          style={{
-            width: '100%',
-            padding: '16px',
-            borderRadius: '12px',
-            border: '2px solid #2a2a4a',
-            background: '#1a1a2e',
-            color: 'white',
-            fontSize: '16px',
-            outline: 'none',
-            marginBottom: '12px'
-          }}
-        />
-
-        <select
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          style={{
-            width: '100%',
-            padding: '14px',
-            borderRadius: '12px',
-            border: '2px solid #2a2a4a',
-            background: '#1a1a2e',
-            color: 'white',
-            fontSize: '14px',
-            marginBottom: '15px'
-          }}
-        >
-          {models.map(m => (
-            <option key={m.value} value={m.value}>{m.label}</option>
-          ))}
-        </select>
-
-        <button
-          onClick={generateImage}
-          disabled={loading}
-          style={{
-            width: '100%',
-            padding: '16px',
-            borderRadius: '12px',
-            border: 'none',
-            background: loading ? '#333' : 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)',
-            color: 'white',
-            fontSize: '16px',
-            fontWeight: 'bold',
-            cursor: loading ? 'not-allowed' : 'pointer'
-          }}
-        >
-          {loading ? '⏳ Generating...' : '✨ Generate Image'}
-        </button>
-
-        <div style={{
-          marginTop: '25px',
-          background: '#1a1a2e',
-          borderRadius: '16px',
-          minHeight: '320px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          border: '2px solid #2a2a4a',
-          overflow: 'hidden'
-        }}>
-          {loading && (
-            <div style={{ textAlign: 'center', padding: '40px' }}>
-              <div style={{
-                width: '45px', height: '45px',
-                border: '4px solid #2a2a4a',
-                borderTop: '4px solid #00d4ff',
-                borderRadius: '50%',
-                animation: 'spin 1s linear infinite',
-                margin: '0 auto 15px'
-              }} />
-              <p>Creating with {model}...</p>
-            </div>
-          )}
-
-          {error && (
-            <div style={{ textAlign: 'center', padding: '40px', color: '#ff6b6b' }}>
-              <p>❌ {error}</p>
-            </div>
-          )}
-
-          {!loading && !error && !imageUrl && (
-            <div style={{ textAlign: 'center', padding: '40px', color: '#555' }}>
-              <p style={{ fontSize: '48px' }}>🖼️</p>
-              <p style={{ marginTop: '10px' }}>Image will appear here</p>
-            </div>
-          )}
-
-          {imageUrl && (
-            <img src={imageUrl} alt="AI Generated" style={{ width: '100%', height: 'auto', display: 'block' }} />
-          )}
+    <div className="container">
+      {/* Balance Display */}
+      {registered && balance !== null && (
+        <div className="card" style={{ padding: '12px', fontSize: '14px', display: 'flex', justifyContent: 'space-between' }}>
+          <span>🌸 Pollen Balance</span>
+          <span><strong>{used.toFixed(3)} used</strong> / {balance.toFixed(2)} total</span>
         </div>
+      )}
 
-        {imageUrl && !loading && (
-          <button
-            onClick={downloadImage}
-            style={{
-              width: '100%',
-              padding: '14px',
-              marginTop: '15px',
-              borderRadius: '12px',
-              border: '2px solid #00d4ff',
-              background: 'transparent',
-              color: '#00d4ff',
-              fontWeight: 'bold',
-              cursor: 'pointer'
-            }}
-          >
-            📥 Download Image
-          </button>
-        )}
+      {/* Usage Stats */}
+      <UsageStats />
 
-        <style jsx global>{`
-          @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        `}</style>
-      </div>
+      {/* Prompt Input */}
+      <textarea
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        placeholder="Describe your image... (English works best)"
+        rows="3"
+        style={{ margin: '15px 0', resize: 'vertical', minHeight: '80px' }}
+      />
+
+      {/* Prompt Controls */}
+      <PromptControls value={prompt} onChange={setPrompt} onGenerate={handleGenerate} />
+
+      {/* Model Selector */}
+      <ModelSelector 
+        selectedModel={model} 
+        onModelChange={setModel} 
+        onLimitReached={handleModelLimit}
+      />
+
+      {/* Aspect Ratio */}
+      <AspectRatioSelector selected={ratio} onChange={setRatio} />
+
+      {/* Generate Button (mobile sticky) */}
+      <button 
+        onClick={handleGenerate} 
+        disabled={loading || !prompt.trim()}
+        style={{ width: '100%', padding: '16px', fontSize: '18px', margin: '15px 0' }}
+      >
+        {loading ? '⏳ Generating...' : '🎨 Generate Image'}
+      </button>
+
+      {/* Image Preview */}
+      <ImagePreview 
+        imageUrl={imageUrl} 
+        onDownload={handleDownload} 
+        loading={loading} 
+        error={error}
+      />
+
+      {/* Share Button (if supported) */}
+      {imageUrl && navigator.share && (
+        <button 
+          onClick={handleShare}
+          style={{ width: '100%', marginTop: '10px', background: 'var(--bg-tertiary)' }}
+        >
+          📤 Share Image
+        </button>
+      )}
+
+      {/* BYOP Popup */}
+      {showBYOP && (
+        <BYOPPopup 
+          model={model} 
+          onClose={() => setShowBYOP(false)} 
+          onConnect={() => {}}
+        />
+      )}
     </div>
   );
 }
