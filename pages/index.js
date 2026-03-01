@@ -48,7 +48,8 @@ export default function Home() {
   };
 
   const selectedRatio = ASPECT_RATIOS.find(r => r.value === ratio) || ASPECT_RATIOS[0];
-  const apiKey = loadAPIKey();
+  // 🔑 Hardcode key yang sudah terbukti work
+const API_KEY = 'pk_pzzzpBDHbpUyct83';
   const registered = isRegistered();
   const prefs = loadPreferences();
 
